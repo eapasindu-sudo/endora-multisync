@@ -31,7 +31,7 @@ jobs:
 
       - name: Install Python packages
         shell: bash -el {0}
-        run: conda install -y -c conda-forge "pyside6=6.11.2" "numpy=2.5.4" "pyinstaller=6.22.3"
+        run: conda install -y -c conda-forge "pyside6=6.11.2" "numpy=2.5.4" "pyinstaller=6.22.3" "libblas=*=*openblas"
 
       - name: Work out the version
         shell: bash
