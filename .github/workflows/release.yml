@@ -1,0 +1,68 @@
+# Every push to main builds the Windows installer and publishes it as a GitHub release.
+# Installed copies of Endora MultiSync see the new release on their next start and offer to update.
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # repo that holds the installers (and the "tools" pre-release with ffmpeg); must be public
+  RELEASE_REPO: eapasindu-sudo/endora-multisync
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Work out the version
+        shell: bash
+        run: |
+          V="$(tr -d '[:space:]' < VERSION).${{ github.run_number }}"
+          echo "V=$V" >> "$GITHUB_ENV"
+          printf 'VERSION = "%s"\n' "$V" > endora/_build_version.py
+          echo "Building $V"
+
+      - name: Install Python packages
+        run: python -m pip install --upgrade pip pyside6 numpy pyinstaller
+
+      - name: Check the code imports
+        run: python -c "from endora import app, sync, drift, xml_export, fcpxml_multicam, resolve_export, project, player, waveform, updater; print(app.VERSION)"
+
+      - name: Build the app
+        run: pyinstaller --noconfirm EndoraMultiSync.spec
+
+      - name: Add ffmpeg
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: |
+          gh release download tools --repo "$RELEASE_REPO" --pattern ffbin.zip
+          unzip -q ffbin.zip -d dist/EndoraMultiSync
+          ls dist/EndoraMultiSync/bin/ffmpeg.exe dist/EndoraMultiSync/bin/ffprobe.exe
+
+      - name: Build the installer
+        shell: bash
+        run: |
+          choco install nsis -y --no-progress || true
+          "/c/Program Files (x86)/NSIS/makensis.exe" -V2 -DVERSION="$V" installer.nsi
+          ls -la "dist/EndoraMultiSync-Setup-$V.exe"
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: |
+          git log -1 --pretty=%B > notes.txt
+          gh release create "v$V" "dist/EndoraMultiSync-Setup-$V.exe" \
+            --repo "$RELEASE_REPO" --title "Endora MultiSync $V" --notes-file notes.txt --latest
