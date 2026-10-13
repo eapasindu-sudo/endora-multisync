@@ -21,9 +21,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      # conda-forge Python + Qt: the same setup as the build that is known to work on Windows
+      - uses: conda-incubator/setup-miniconda@v3
         with:
+          miniforge-version: latest
+          activate-environment: build
           python-version: "3.12"
+          channels: conda-forge
+
+      - name: Install Python packages
+        shell: bash -el {0}
+        run: conda install -y -c conda-forge "pyside6=6.11.2" "numpy=2.5.4" "pyinstaller=6.22.3"
 
       - name: Work out the version
         shell: bash
@@ -33,14 +41,20 @@ jobs:
           printf 'VERSION = "%s"\n' "$V" > endora/_build_version.py
           echo "Building $V"
 
-      - name: Install Python packages
-        run: python -m pip install --upgrade pip pyside6 numpy pyinstaller
-
       - name: Check the code imports
+        shell: bash -el {0}
         run: python -c "from endora import app, sync, drift, xml_export, fcpxml_multicam, resolve_export, project, player, waveform, updater; print(app.VERSION)"
 
       - name: Build the app
+        shell: bash -el {0}
         run: pyinstaller --noconfirm EndoraMultiSync.spec
+
+      - name: Check the built app starts
+        shell: bash
+        run: |
+          timeout 180 ./dist/EndoraMultiSync/EndoraMultiSync.exe --selftest selftest.txt || true
+          cat selftest.txt
+          grep -q "^ok " selftest.txt
 
       - name: Add ffmpeg
         shell: bash
