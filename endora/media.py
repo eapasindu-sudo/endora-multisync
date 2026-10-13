@@ -83,6 +83,7 @@ class Clip:
     tc_start: Optional[float] = None  # seconds since midnight from embedded timecode
     tc_string: Optional[str] = None
     created: Optional[float] = None  # file creation time (epoch seconds) from metadata or disk
+    created_meta: bool = False    # created came from the file's own metadata (not the disk date)
     take: Optional[str] = None    # recorder take id; clips of one take start together
     channel: int = 0              # which channel this layer uses (0-based)
     original_path: Optional[str] = None  # set when this clip uses a drift-corrected copy
@@ -146,6 +147,7 @@ def make_clip(path: str) -> Clip:
         try:
             from datetime import datetime
             c.created = datetime.fromisoformat(ct.replace("Z", "+00:00")).timestamp()
+            c.created_meta = True
         except ValueError:
             c.created = None
     if c.created is None:

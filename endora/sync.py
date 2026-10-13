@@ -387,6 +387,8 @@ def _run_once(layers: list[Layer], mode: str, log, progress, verify_window: floa
                     u.note = "No timecode, placed by audio waveform"
         progress(1.0)
 
+    keep_recording_order(layers, units, log)
+
     # copy results to clips; recorder takes keep their relative offsets
     for u in units:
         for c in u.clips:
@@ -473,6 +475,92 @@ def _audio_place(units: list[Unit], log, progress, preplaced: Optional[list[Unit
         u.note = "No audio in this clip" if u.env is None else "No match found. Check this clip by hand."
 
 
+def recording_order(clips: list[Clip]) -> list[Clip]:
+    """Clips of one camera in the order they were shot: by the recording time stored in the files when
+    every clip has one, otherwise by folder and file name (cameras number their files in order).
+    Disk dates aren't trusted for this: copying cards can change them."""
+    by_name = sorted(clips, key=lambda c: (os.path.dirname(c.path).lower(), os.path.basename(c.path).lower()))
+    if all(c.created is not None and c.created_meta for c in clips):
+        return sorted(by_name, key=lambda c: c.created)
+    return by_name
+
+
+ORDER_SLACK = 1.0   # seconds two clips of one camera may appear to overlap before it counts as out of order
+
+
+def keep_recording_order(layers: list[Layer], units: list[Unit], log=print):
+    """A camera shoots its clips one after another, so they must land on the timeline in that order.
+    Wedding audio repeats (the same song, the same applause), so a clip can match the wrong spot.
+    Keep the best-scoring run of clips that is in order; search again for the others only in the gap
+    where they belong, and leave any that still don't fit for place_unsynced to slot in by order."""
+    unit_of = {id(c): u for u in units for c in u.clips}
+    for layer in layers:
+        if layer.source == "camera-audio" or len(layer.clips) < 2:
+            continue
+        seq: list[Unit] = []
+        for c in recording_order(layer.clips):
+            u = unit_of.get(id(c))
+            if u is not None and u not in seq:
+                seq.append(u)
+        placed = [u for u in seq if u.start is not None]
+        if len(placed) < 2:
+            continue
+        # heaviest chain of clips whose positions follow the shooting order
+        n = len(placed)
+        w = [0.2 + u.confidence for u in placed]
+        best, prev = w[:], [-1] * n
+        for i in range(n):
+            for j in range(i):
+                if placed[j].start + placed[j].length <= placed[i].start + ORDER_SLACK and best[j] + w[i] > best[i]:
+                    best[i], prev[i] = best[j] + w[i], j
+        i = int(np.argmax(best))
+        chain = set()
+        while i >= 0:
+            chain.add(id(placed[i]))
+            i = prev[i]
+        wrong = [u for u in placed if id(u) not in chain]
+        if not wrong:
+            continue
+        if len(wrong) > max(1, n // 3):
+            # too many to be bad matches: more likely these files aren't numbered in shooting order
+            log(f"{layer.name}: clip order doesn't follow the file names, so order wasn't enforced")
+            continue
+        for v in wrong:
+            v.start = None
+        for v in wrong:
+            k = seq.index(v)
+            before = next((u for u in reversed(seq[:k]) if u.start is not None), None)
+            after = next((u for u in seq[k + 1:] if u.start is not None), None)
+            lo = before.start + before.length - ORDER_SLACK if before else None
+            hi = after.start - v.length + ORDER_SLACK if after else None
+            start = None
+            if v.env is not None and (lo is None or hi is None or hi >= lo):
+                comp = Composite()
+                others = [u for u in units if u is not v and u.start is not None and u.env is not None]
+                for u in others:
+                    comp.add(u.env, u.start)
+                if not comp.empty():
+                    ref = comp.ref()
+                    a = int((lo - comp.origin) * ENV_RATE) if lo is not None else -len(v.env)
+                    b = int((hi - comp.origin) * ENV_RATE) if hi is not None else len(ref)
+                    lag, z, _ = match(v.env, ref, (a, b))
+                    if lag is not None:
+                        cand = comp.origin + lag / ENV_RATE
+                        r, refined = raw_check(v, cand, others)
+                        if z >= MIN_Z or r >= RAW_MIN:
+                            start = refined if r >= RAW_MIN else cand
+                            v.confidence = conf_from_z(z) if z >= MIN_Z else float(np.clip(0.7 + r, 0.75, 0.97))
+            if start is not None:
+                v.start, v.status = start, "warn"
+                v.method = (v.method or "Audio") + " (re-checked)"
+                v.note = "First match was out of shooting order. Found again in the right gap, check it."
+                log(f"{v.label}: matched out of order, re-synced in the right gap")
+            else:
+                v.status, v.method = "bad", "Not synced"
+                v.note = "Audio matched out of shooting order. Placed in order, check by hand."
+                log(f"{v.label}: matched out of order, placed in order instead")
+
+
 def place_unsynced(layers: list[Layer], gap: float = 1.0):
     """Keep clips that couldn't be synced on the timeline, in file order on their own layer.
     If the clip's recorded time is known, use it (shifted like the synced clips of the same layer);
@@ -482,7 +570,7 @@ def place_unsynced(layers: list[Layer], gap: float = 1.0):
     for layer in layers:
         if layer.source == "camera-audio":
             continue
-        clips = sorted(layer.clips, key=lambda c: (os.path.dirname(c.path).lower(), os.path.basename(c.path).lower()))
+        clips = recording_order(layer.clips)
         if all(c.start is not None for c in clips):
             continue
         # how this camera's clock relates to the timeline, from clips that did sync
