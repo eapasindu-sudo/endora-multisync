@@ -16,5 +16,4 @@ To start a new minor line (1.2.x, 2.0.x), change the `VERSION` file.
 ## One-time setup
 
 - This repo must stay public so the app can download updates without a password.
-- The pre-release tagged `tools` holds `ffbin.zip` (the `bin` folder with `ffmpeg.exe`,
-  `ffprobe.exe` and their DLLs). The build adds it to every installer.
+- The build downloads ffmpeg (BtbN's Windows build) and bundles it into every installer.

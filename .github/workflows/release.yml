@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 env:
-  # repo that holds the installers (and the "tools" pre-release with ffmpeg); must be public
+  # repo that holds the installers; must be public so the app can download them
   RELEASE_REPO: eapasindu-sudo/endora-multisync
 
 jobs:
@@ -44,12 +44,12 @@ jobs:
 
       - name: Add ffmpeg
         shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: |
-          gh release download tools --repo "$RELEASE_REPO" --pattern ffbin.zip
-          unzip -q ffbin.zip -d dist/EndoraMultiSync
-          ls dist/EndoraMultiSync/bin/ffmpeg.exe dist/EndoraMultiSync/bin/ffprobe.exe
+          curl -sSL -o ff.zip https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip
+          unzip -q ff.zip -d ff
+          mkdir -p dist/EndoraMultiSync/bin
+          cp ff/*/bin/ffmpeg.exe ff/*/bin/ffprobe.exe ff/*/bin/*.dll dist/EndoraMultiSync/bin/
+          dist/EndoraMultiSync/bin/ffmpeg.exe -hide_banner -version | head -1
 
       - name: Build the installer
         shell: bash
