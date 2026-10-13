@@ -46,6 +46,9 @@ Function .onInit
 FunctionEnd
 Section "Install"
   SetShellVarContext all
+  ; clear out the previous version first: leftover DLLs from an older build break the new one
+  RMDir /r "$INSTDIR\_internal"
+  RMDir /r "$INSTDIR\bin"
   SetOutPath "$INSTDIR"
   File /r "dist\EndoraMultiSync\*.*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
